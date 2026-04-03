@@ -2,6 +2,9 @@
 --// Copyright (c) 2026 Celeste Softworks
 --// https://github.com/Storm99999/Motionflow
 
+--!native
+--!optimize 2
+
 type Vector = vector
 
 type Any = { [any]: any }
@@ -64,6 +67,7 @@ type CCDIKControllerObject = {
 	_Connections: ConnectionArray,
 	_JumpToken: number,
 	JumpPoseDefaults: JumpPoseOptions,
+	FootAttachmentTable: AttachmentArray?,
 }
 
 local CCDIKController: CCDIKControllerObject = {} :: any
@@ -120,13 +124,15 @@ local Motionflow: Folder = ReplicatedStorage:WaitForChild("Motionflow") :: Folde
 local Maid: any = nil
 
 do
-	local OK: boolean, ERR: any = pcall(function()
-		Maid = require(Motionflow.Dependencies.Maid)
-	end)
+	local EnsureDependencies = (function()
+		local OK, ERR = pcall(function()
+			Maid = require(Motionflow.Dependencies:FindFirstChild("Maid"))
+		end)
 
-	if not OK then
-		warn("[Motionflow @ MotionCore] Dependency is missing; Please reinstall the module.")
-	end
+		if ERR then
+			warn("[Motionflow @ CCDIKController] Dependency is missing; Please reinstall the module.")
+		end
+	end)()
 end
 
 --// Functions
@@ -720,9 +726,29 @@ function CCDIKController:SetupFoot(AttachmentNameTable: { string }, RaycastParam
 	local FootPart: BasePart = FootJoint.Part1 :: BasePart
 	local FootAttachmentTable: AttachmentArray = table.create(#AttachmentNameTable) :: AttachmentArray
 
+	local HalfX: number = math.max(FootPart.Size.X * 0.35, 0.15)
+	local HalfZ: number = math.max(FootPart.Size.Z * 0.35, 0.15)
+	local SoleY: number = -(FootPart.Size.Y * 0.5) + 0.02
+	local DefaultOffsets: { Vector3 } = {
+		Vector3.new(-HalfX, SoleY, HalfZ),
+		Vector3.new(HalfX, SoleY, HalfZ),
+		Vector3.new(0, SoleY, -HalfZ),
+	}
+
 	for Index = 1, #AttachmentNameTable do
-		local AttachmentInstance: Instance? = FootPart:FindFirstChild(AttachmentNameTable[Index])
-		FootAttachmentTable[Index] = AttachmentInstance :: Attachment?
+		local Name: string = AttachmentNameTable[Index]
+		local AttachmentInstance: Instance? = FootPart:FindFirstChild(Name)
+
+		if AttachmentInstance and AttachmentInstance:IsA("Attachment") then
+			FootAttachmentTable[Index] = AttachmentInstance :: Attachment
+		else
+			local NewAttachment: Attachment = InstanceNew("Attachment") :: Attachment
+			NewAttachment.Name = Name
+			NewAttachment.Position = DefaultOffsets[Index] or Vector3.zero
+			NewAttachment.Parent = FootPart
+			FootAttachmentTable[Index] = NewAttachment
+			self.Maid:GiveTask(NewAttachment)
+		end
 	end
 
 	self.FootAttachmentTable = FootAttachmentTable
@@ -1082,7 +1108,6 @@ function CCDIKController.commandBarSetupRigAttachments(Model: Model)
 		if Object:IsA("Motor6D") then
 			local Motor: Motor6D = Object
 			local Motor6DName: string = Motor.Name
-
 			local Part0: BasePart = Motor.Part0 :: BasePart
 			local Part1: BasePart = Motor.Part1 :: BasePart
 
